@@ -94,14 +94,17 @@ class SimulationApp:
         actions = ttk.Frame(left_panel)
         actions.pack(fill=tk.X, pady=(0, 12))
         run_button = ttk.Button(actions, text="Запустить модель", command=self.run_model)
-        run_button.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=2)
+        run_button.grid(row=0, column=0, sticky="ew", padx=(0, 2), pady=2)
         reset_button = ttk.Button(actions, text="Сбросить параметры", command=self.reset_parameters)
-        reset_button.grid(row=0, column=1, sticky="ew", pady=2)
+        reset_button.grid(row=0, column=1, sticky="ew", padx=2, pady=2)
         metrics_button = ttk.Button(actions, text="Показатели эффективности", command=self.open_metrics_window)
-        metrics_button.grid(row=0, column=2, sticky="ew", padx=(4, 0), pady=2)
+        metrics_button.grid(row=0, column=2, sticky="ew", padx=2, pady=2)
+        adaptive_button = ttk.Button(actions, text="Адаптивный алгоритм", command=self.open_adaptive_results_window)
+        adaptive_button.grid(row=0, column=3, sticky="ew", padx=(2, 0), pady=2)
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(1, weight=1)
         actions.columnconfigure(2, weight=1)
+        actions.columnconfigure(3, weight=1)
 
         graph_frame = ttk.LabelFrame(left_panel, text="Графики", padding=12)
         graph_frame.pack(fill=tk.X, pady=(0, 10))
@@ -235,6 +238,14 @@ class SimulationApp:
             messagebox.showerror("Ошибка", "Неверный формат параметров. Введите числовые значения.")
             return
         MetricsWindow(self.root, kwargs, T, dt, seed)
+
+    def open_adaptive_results_window(self):
+        try:
+            kwargs, T, dt, seed = self.get_simulation_parameters()
+        except ValueError:
+            messagebox.showerror("Ошибка", "Неверный формат параметров. Введите числовые значения.")
+            return
+        AdaptiveResultsWindow(self.root, kwargs, T, dt)
 
     def show_param_description(self, name):
         display_name = self.param_display_names.get(name, name)
@@ -429,3 +440,160 @@ class MetricsWindow:
             low = max(1.0, base * 0.5)
             high = base * 1.5
         return np.linspace(low, high, points)
+
+
+class AdaptiveResultsWindow:
+    """Окно для отображения результатов адаптивного алгоритма в таблице."""
+    
+    METRIC_DISPLAY_NAMES = {
+        "G_total": "Общий выпуск G(T)",
+        "q_avg": "Средний темп выпуска",
+        "I_avg_A": "Средний запас A",
+        "I_avg_B": "Средний запас B",
+        "downtime_frac_A": "Доля времени простоя A",
+        "downtime_frac_B": "Доля времени простоя B",
+        "stop_prob_A": "Вероятность остановки A",
+        "stop_prob_B": "Вероятность остановки B",
+    }
+
+    def __init__(self, root, base_kwargs, T, dt):
+        self.base_kwargs = base_kwargs
+        self.T = T
+        self.dt = dt
+        
+        self.window = tk.Toplevel(root)
+        self.window.title("Адаптивный алгоритм: результаты")
+        self.window.geometry("1100x650")
+        self.window.configure(background="#f3f4f6")
+        
+        self.simulator = ProductionSimulator(**base_kwargs)
+        self.results = None
+        
+        self._build_ui()
+        self._run_adaptive_algorithm()
+
+    def _build_ui(self):
+        """Построить интерфейс окна."""
+        # Фрейм для информации и прогресса
+        info_frame = ttk.Frame(self.window, padding=10)
+        info_frame.pack(side=tk.TOP, fill=tk.X)
+        
+        ttk.Label(info_frame, text="Статус:", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=5)
+        self.status_label = ttk.Label(info_frame, text="Инициализация...", foreground="blue")
+        self.status_label.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Фрейм для таблицы
+        table_frame = ttk.Frame(self.window, padding=10)
+        table_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
+        # Scrollbar для таблицы
+        scrollbar = ttk.Scrollbar(table_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Treeview таблица
+        columns = ("Показатель", "Среднее", "Станд. отклонение", "Минимум", "Максимум")
+        self.tree = ttk.Treeview(table_frame, columns=columns, height=18, yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.tree.yview)
+        
+        # Определение столбцов
+        self.tree.column("#0", width=0, stretch=tk.NO)
+        self.tree.column("Показатель", anchor=tk.W, width=180)
+        self.tree.column("Среднее", anchor=tk.CENTER, width=140)
+        self.tree.column("Станд. отклонение", anchor=tk.CENTER, width=140)
+        self.tree.column("Минимум", anchor=tk.CENTER, width=140)
+        self.tree.column("Максимум", anchor=tk.CENTER, width=140)
+        
+        # Заголовки
+        self.tree.heading("#0", text="", anchor=tk.W)
+        self.tree.heading("Показатель", text="Показатель", anchor=tk.W)
+        self.tree.heading("Среднее", text="Среднее", anchor=tk.CENTER)
+        self.tree.heading("Станд. отклонение", text="Станд. отклонение", anchor=tk.CENTER)
+        self.tree.heading("Минимум", text="Минимум", anchor=tk.CENTER)
+        self.tree.heading("Максимум", text="Максимум", anchor=tk.CENTER)
+        
+        self.tree.pack(fill=tk.BOTH, expand=True)
+        
+        # Фрейм для информации об алгоритме
+        info_panel = ttk.LabelFrame(self.window, text="Информация об алгоритме", padding=10)
+        info_panel.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
+        
+        self.info_text = tk.Text(info_panel, height=4, wrap=tk.WORD, borderwidth=0, background="#f8f9fb")
+        self.info_text.pack(fill=tk.BOTH, expand=True)
+        self.info_text.configure(state="disabled")
+
+    def _run_adaptive_algorithm(self):
+        """Запустить адаптивный алгоритм в отдельном потоке."""
+        import threading
+        
+        def run():
+            def progress_callback(msg):
+                self.window.after(0, lambda: self._update_status(msg))
+            
+            try:
+                self.results = self.simulator.adaptive_algorithm(
+                    T=self.T,
+                    dt=self.dt,
+                    quality_metric="G_total",
+                    epsilon=0.2,
+                    N_initial=50,
+                    alpha_level=0.05,
+                    max_iterations=10,
+                    progress_callback=progress_callback
+                )
+                self.window.after(0, self._populate_table)
+            except Exception as e:
+                self.window.after(0, lambda: self._show_error(str(e)))
+        
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+    def _update_status(self, msg):
+        """Обновить статус."""
+        self.status_label.config(text=msg, foreground="blue")
+        self.window.update_idletasks()
+
+    def _populate_table(self):
+        """Заполнить таблицу результатами."""
+        if not self.results or "metrics" not in self.results:
+            self.status_label.config(text="Ошибка: результаты не получены", foreground="red")
+            return
+        
+        # Очистить таблицу
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        metrics = self.results["metrics"]
+        
+        # Добавить строки
+        for metric_key, metric_data in metrics.items():
+            display_name = self.METRIC_DISPLAY_NAMES.get(metric_key, metric_key)
+            values = (
+                display_name,
+                f"{metric_data['mean']:.6f}",
+                f"{metric_data['std']:.6f}",
+                f"{metric_data['min']:.6f}",
+                f"{metric_data['max']:.6f}",
+            )
+            self.tree.insert("", "end", values=values)
+        
+        # Обновить информацию об алгоритме
+        info = (
+            f"Статус: {self.results['status']} | "
+            f"Число реализаций: N={self.results['N']} | "
+            f"Итерации адаптации: {self.results['iterations']} | "
+            f"Показатель качества: {self.results['quality_metric']} | "
+            f"Относительная ошибка: ε={self.results['epsilon']} | "
+            f"Уровень значимости: α={self.results['alpha_level']}"
+        )
+        
+        self.info_text.configure(state="normal")
+        self.info_text.delete("1.0", tk.END)
+        self.info_text.insert("1.0", info)
+        self.info_text.configure(state="disabled")
+        
+        self.status_label.config(text="Вычисления завершены", foreground="green")
+
+    def _show_error(self, error_msg):
+        """Показать ошибку."""
+        self.status_label.config(text=f"Ошибка: {error_msg}", foreground="red")
+        messagebox.showerror("Ошибка", f"Ошибка при выполнении алгоритма:\n{error_msg}")

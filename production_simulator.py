@@ -183,3 +183,129 @@ class ProductionSimulator:
             "stop_prob_A": stop_prob_A,
             "stop_prob_B": stop_prob_B,
         }
+
+    def adaptive_algorithm(self, T=100, dt=1, quality_metric="G_total", epsilon=0.2, N_initial=50, alpha_level=0.05, max_iterations=10, progress_callback=None):
+        """
+        Адаптивный алгоритм получения усреднённых значений показателей эффективности.
+        
+        Параметры:
+        - T: горизонт моделирования
+        - dt: шаг дискретизации
+        - quality_metric: ключ метрики для расчёта σ (среднеквадратического отклонения)
+        - epsilon: относительная ошибка ε (по умолчанию 0.2 = 20%)
+        - N_initial: начальное число реализаций (по умолчанию 50)
+        - alpha_level: уровень значимости α (по умолчанию 0.05 для 95% уровня)
+        - max_iterations: максимальное число итераций адаптации
+        - progress_callback: функция обратного вызова для отслеживания прогресса
+        
+        Возвращает:
+        - dict с усреднёнными значениями метрик и информацией об алгоритме
+        """
+        try:
+            from scipy import stats
+        except ImportError:
+            stats = None
+        
+        N = N_initial
+        iteration = 0
+        
+        while iteration < max_iterations:
+            iteration += 1
+            if progress_callback:
+                progress_callback(f"Итерация {iteration}: запуск {N} реализаций...")
+            
+            # Запускаем N реализаций и собираем метрики
+            all_metrics = []
+            for i in range(N):
+                result = self.simulate(T=T, dt=dt, seed=i + iteration * 10000)
+                metrics = self.calculate_metrics(result)
+                all_metrics.append(metrics)
+                if progress_callback and (i + 1) % max(1, N // 5) == 0:
+                    progress_callback(f"  Реализация {i + 1}/{N}...")
+            
+            # Извлекаем значения качественного показателя
+            quality_values = np.array([m[quality_metric] for m in all_metrics])
+            
+            # Расчёт среднего значения и стандартного отклонения
+            mean_value = float(np.mean(quality_values))
+            std_value = float(np.std(quality_values, ddof=1)) if N > 1 else 0.0
+            
+            # Получение критического значения t_alpha
+            if stats is not None:
+                df = N - 1
+                t_alpha = stats.t.ppf(1 - alpha_level / 2, df)
+            else:
+                # Приближённое значение для нормального распределения (без scipy)
+                t_alpha = 1.96 if alpha_level == 0.05 else 2.576  # для α=0.05 и α=0.01
+            
+            # Расчёт требуемого числа реализаций
+            if std_value > 0 and mean_value > 0:
+                N_required = int(np.ceil((std_value / (epsilon * mean_value)) ** 2 * t_alpha ** 2))
+            else:
+                N_required = N
+            
+            if progress_callback:
+                progress_callback(f"  N={N}, σ={std_value:.4f}, N'={N_required}")
+            
+            # Проверка условия остановки
+            if N_required <= N:
+                # Алгоритм сходился
+                if progress_callback:
+                    progress_callback(f"Алгоритм сходился за {iteration} итераций. N={N}")
+                
+                # Вычисляем финальные усреднённые значения всех метрик
+                final_metrics = {}
+                for key in all_metrics[0].keys():
+                    values = np.array([m[key] for m in all_metrics])
+                    final_metrics[key] = {
+                        "mean": float(np.mean(values)),
+                        "std": float(np.std(values, ddof=1)) if N > 1 else 0.0,
+                        "min": float(np.min(values)),
+                        "max": float(np.max(values)),
+                    }
+                
+                return {
+                    "status": "success",
+                    "metrics": final_metrics,
+                    "N": N,
+                    "iterations": iteration,
+                    "quality_metric": quality_metric,
+                    "epsilon": epsilon,
+                    "alpha_level": alpha_level,
+                }
+            else:
+                # Нужна адаптация
+                N = N_required
+                if progress_callback:
+                    progress_callback(f"  Требуется больше реализаций: N'={N}. Повторяем...")
+        
+        # Если вышли из цикла без сходимости
+        if progress_callback:
+            progress_callback(f"Достигнут лимит итераций ({max_iterations}). Используем N={N}")
+        
+        # Запускаем финальную серию с текущим N
+        all_metrics = []
+        for i in range(N):
+            result = self.simulate(T=T, dt=dt, seed=i + iteration * 10000)
+            metrics = self.calculate_metrics(result)
+            all_metrics.append(metrics)
+        
+        final_metrics = {}
+        for key in all_metrics[0].keys():
+            values = np.array([m[key] for m in all_metrics])
+            final_metrics[key] = {
+                "mean": float(np.mean(values)),
+                "std": float(np.std(values, ddof=1)) if N > 1 else 0.0,
+                "min": float(np.min(values)),
+                "max": float(np.max(values)),
+            }
+        
+        return {
+            "status": "max_iterations_reached",
+            "metrics": final_metrics,
+            "N": N,
+            "iterations": iteration,
+            "quality_metric": quality_metric,
+            "epsilon": epsilon,
+            "alpha_level": alpha_level,
+        }
