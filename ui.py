@@ -8,7 +8,6 @@ from matplotlib.figure import Figure
 
 from production_simulator import ProductionSimulator
 
-
 class SimulationApp:
     def __init__(self, root):
         self.root = root
