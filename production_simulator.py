@@ -185,22 +185,6 @@ class ProductionSimulator:
         }
 
     def adaptive_algorithm(self, T=100, dt=1, quality_metric="G_total", epsilon=0.2, N_initial=50, alpha_level=0.05, max_iterations=10, progress_callback=None):
-        """
-        Адаптивный алгоритм получения усреднённых значений показателей эффективности.
-        
-        Параметры:
-        - T: горизонт моделирования
-        - dt: шаг дискретизации
-        - quality_metric: ключ метрики для расчёта σ (среднеквадратического отклонения)
-        - epsilon: относительная ошибка ε (по умолчанию 0.2 = 20%)
-        - N_initial: начальное число реализаций (по умолчанию 50)
-        - alpha_level: уровень значимости α (по умолчанию 0.05 для 95% уровня)
-        - max_iterations: максимальное число итераций адаптации
-        - progress_callback: функция обратного вызова для отслеживания прогресса
-        
-        Возвращает:
-        - dict с усреднёнными значениями метрик и информацией об алгоритме
-        """
         try:
             from scipy import stats
         except ImportError:

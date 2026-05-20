@@ -442,9 +442,7 @@ class MetricsWindow:
         return np.linspace(low, high, points)
 
 
-class AdaptiveResultsWindow:
-    """Окно для отображения результатов адаптивного алгоритма в таблице."""
-    
+class AdaptiveResultsWindow:    
     METRIC_DISPLAY_NAMES = {
         "G_total": "Общий выпуск G(T)",
         "q_avg": "Средний темп выпуска",
