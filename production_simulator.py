@@ -92,11 +92,7 @@ class ProductionSimulator:
             current_y_CB = y_CB[k]
             current_G = G[k]
 
-            addition_A = self.sample_replenishment(rng) * self.y_A0
-            addition_B = self.sample_replenishment(rng) * self.y_B0
-            current_y_A += addition_A + self.X1
-            current_y_B += addition_B
-
+            # ШАГ 1: Определить расход на основе ТЕКУЩИХ (ещё не пополненных) запасов
             if current_y_A <= self.threshold_stop * self.y_A0:
                 input_A = 0.0
             else:
@@ -106,24 +102,40 @@ class ProductionSimulator:
             else:
                 input_B = min(self.P_B, current_y_B)
 
+            # ШАГ 2: Вычислить выходы из технологических буферов
             output_A = current_pA / self.D11
             output_B1 = current_pB1 / self.D21
             output_B2 = current_pB2 / self.D22
             output_B3 = current_pB3 / self.D23
 
+            # ШАГ 3: Вычислить темп сборки на основе текущих запасов компонентов
             possible_assembly = min(current_y_CA, current_y_CB, self.P_C)
             assembly_rate = possible_assembly
 
-            next_y_A = max(current_y_A - input_A * dt, 0.0)
-            next_y_B = max(current_y_B - input_B * dt, 0.0)
+            # ШАГ 4: Применить расход к запасам (вычесть из текущих значений)
+            y_A_after_consumption = max(current_y_A - input_A * dt, 0.0)
+            y_B_after_consumption = max(current_y_B - input_B * dt, 0.0)
+
+            # ШАГ 5: ЗАТЕМ добавить пополнение и постоянный внешний поток
+            addition_A = self.sample_replenishment(rng) * self.y_A0
+            addition_B = self.sample_replenishment(rng) * self.y_B0
+            next_y_A = y_A_after_consumption + addition_A + self.X1 * dt
+            next_y_B = y_B_after_consumption + addition_B
+
+            # ШАГ 6: Обновить буферы обработки
             next_pA = max(current_pA + (input_A - output_A) * dt, 0.0)
             next_pB1 = max(current_pB1 + (input_B - output_B1) * dt, 0.0)
             next_pB2 = max(current_pB2 + (output_B1 - output_B2) * dt, 0.0)
             next_pB3 = max(current_pB3 + (output_B2 - output_B3) * dt, 0.0)
+
+            # ШАГ 7: Обновить запасы компонентов в сборочном отделе
             next_y_CA = max(current_y_CA + (output_A - assembly_rate) * dt, 0.0)
             next_y_CB = max(current_y_CB + (output_B3 - assembly_rate) * dt, 0.0)
+
+            # ШАГ 8: Обновить накопленный выпуск
             next_G = current_G + assembly_rate * dt
 
+            # Сохранить результаты в массивы
             y_A[k + 1] = next_y_A
             y_B[k + 1] = next_y_B
             pA[k + 1] = next_pA
